@@ -1,5 +1,6 @@
 import java.io.*;
 import java.net.*;
+import java.util.Scanner;
 
 public class ChatClient {
     private static final String SERVER_ADDRESS = "localhost";
@@ -9,7 +10,15 @@ public class ChatClient {
         try (Socket socket = new Socket(SERVER_ADDRESS, PORT);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-             BufferedReader consoleInput = new BufferedReader(new InputStreamReader(System.in))) {
+             BufferedReader consoleInput = new BufferedReader(new InputStreamReader(System.in));
+             Scanner scanner = new Scanner(System.in)) {
+
+            System.out.print("Enter username: ");
+            String username = scanner.nextLine();
+            System.out.print("Enter password: ");
+            String password = scanner.nextLine();
+
+            out.println(username + ":" + password);
 
             System.out.println("Connected to the chat server!");
 
@@ -17,11 +26,12 @@ public class ChatClient {
                 String message;
                 try {
                     while ((message = in.readLine()) != null) {
-                        System.out.println("\n[Server]: " + message);
+                        System.out.print("\r" + " ".repeat(80) + "\r");
+                        System.out.println(message);
                         System.out.print("Message: ");
                     }
                 } catch (IOException e) {
-                    System.err.println("Error reading messages from the server.");
+                    System.err.println("Connection to server lost.");
                 }
             }).start();
 
