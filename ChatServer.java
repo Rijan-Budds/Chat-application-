@@ -11,9 +11,10 @@ public class ChatServer {
     private static final List<String> messageHistory = new ArrayList<>();
     private static final int MAX_HISTORY = 100;
     private static final Map<String, Set<String>> chatRooms = new HashMap<>();
+    private static final String USER_DATA_FILE = "users.txt";
 
     public static void main(String[] args) {
-        initializeUsers();
+        loadUsers();
         System.out.println("Chat server started on port " + PORT + "...");
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             while (true) {
@@ -29,9 +30,44 @@ public class ChatServer {
         }
     }
 
-    private static void initializeUsers() {
-        userPasswords.put("Padma", "padma");
-        userPasswords.put("Rijan", "rijan");
+    private static void loadUsers() {
+        try {
+            File file = new File(USER_DATA_FILE);
+            if (!file.exists()) {
+                file.createNewFile();
+                return;
+            }
+            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(":");
+                    if (parts.length == 2) {
+                        userPasswords.put(parts[0], parts[1]);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error loading users: " + e.getMessage());
+        }
+    }
+
+    private static synchronized void saveUsers() {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(USER_DATA_FILE))) {
+            for (Map.Entry<String, String> entry : userPasswords.entrySet()) {
+                writer.println(entry.getKey() + ":" + entry.getValue());
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving users: " + e.getMessage());
+        }
+    }
+
+    private static synchronized boolean registerUser(String username, String password) {
+        if (userPasswords.containsKey(username)) {
+            return false;
+        }
+        userPasswords.put(username, password);
+        saveUsers();
+        return true;
     }
 
     static class ClientHandler implements Runnable {
@@ -45,21 +81,52 @@ public class ChatServer {
             this.socket = socket;
         }
 
-        private boolean authenticate(String credentials) {
-            try {
-                String[] parts = credentials.split(":");
-                if (parts.length == 2) {
-                    String username = parts[0].trim();
-                    String password = parts[1].trim();
-                    if (userPasswords.containsKey(username) && 
-                        userPasswords.get(username).equals(password)) {
-                        this.username = username;
-                        return true;
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("Authentication error: " + e.getMessage());
+        private boolean handleInitialConnection() throws IOException {
+            out.println("Welcome! Enter '1' to login or '2' to register:");
+            String choice = in.readLine();
+
+            if ("2".equals(choice)) {
+                return handleRegistration();
+            } else {
+                return handleLogin();
             }
+        }
+
+        private boolean handleRegistration() throws IOException {
+            out.println("Enter desired username:");
+            String newUsername = in.readLine();
+
+            if (newUsername == null || newUsername.trim().isEmpty() || userPasswords.containsKey(newUsername)) {
+                out.println("Invalid username or already exists!");
+                return false;
+            }
+
+            out.println("Enter password:");
+            String newPassword = in.readLine();
+
+            if (newPassword == null || newPassword.trim().isEmpty()) {
+                out.println("Invalid password!");
+                return false;
+            }
+
+            if (registerUser(newUsername, newPassword)) {
+                this.username = newUsername;
+                return true;
+            }
+            return false;
+        }
+
+        private boolean handleLogin() throws IOException {
+            out.println("Enter username:");
+            String username = in.readLine();
+            out.println("Enter password:");
+            String password = in.readLine();
+
+            if (userPasswords.containsKey(username) && userPasswords.get(username).equals(password)) {
+                this.username = username;
+                return true;
+            }
+            out.println("Login failed!");
             return false;
         }
 
@@ -68,38 +135,22 @@ public class ChatServer {
             String command = parts[0].toLowerCase();
 
             switch (command) {
-                case "/help":
-                    sendHelpMessage();
-                    break;
-                case "/online":
-                    listOnlineUsers();
-                    break;
-                case "/history":
-                    sendMessageHistory();
-                    break;
+                case "/help": sendHelpMessage(); break;
+                case "/online": listOnlineUsers(); break;
+                case "/history": sendMessageHistory(); break;
                 case "/whisper":
-                    if (parts.length >= 3) {
-                        sendPrivateMessage(parts[1], parts[2]);
-                    } else {
-                        out.println("Usage: /whisper <username> <message>");
-                    }
+                    if (parts.length >= 3) sendPrivateMessage(parts[1], parts[2]);
+                    else out.println("Usage: /whisper <username> <message>");
                     break;
                 case "/createroom":
-                    if (parts.length >= 2) {
-                        createChatRoom(parts[1]);
-                    } else {
-                        out.println("Usage: /createroom <roomname>");
-                    }
+                    if (parts.length >= 2) createChatRoom(parts[1]);
+                    else out.println("Usage: /createroom <roomname>");
                     break;
                 case "/join":
-                    if (parts.length >= 2) {
-                        joinChatRoom(parts[1]);
-                    } else {
-                        out.println("Usage: /join <roomname>");
-                    }
+                    if (parts.length >= 2) joinChatRoom(parts[1]);
+                    else out.println("Usage: /join <roomname>");
                     break;
-                default:
-                    out.println("Unknown command. Type /help for available commands.");
+                default: out.println("Unknown command. Type /help for available commands.");
             }
         }
 
@@ -145,9 +196,7 @@ public class ChatServer {
                         break;
                     }
                 }
-                if (!found) {
-                    out.println("User '" + recipient + "' is not online.");
-                }
+                if (!found) out.println("User '" + recipient + "' is not online.");
             }
         }
 
@@ -187,11 +236,7 @@ public class ChatServer {
                 in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 out = new PrintWriter(socket.getOutputStream(), true);
 
-                out.println("Please enter username:password");
-                String credentials = in.readLine();
-                
-                if (!authenticate(credentials)) {
-                    out.println("Authentication failed!");
+                if (!handleInitialConnection()) {
                     socket.close();
                     return;
                 }
